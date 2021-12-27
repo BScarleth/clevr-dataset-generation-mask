@@ -325,6 +325,12 @@ def render_scene(args,
   if output_blendfile is not None:
     bpy.ops.wm.save_as_mainfile(filepath=output_blendfile)
 
+def assign_mask_to_object(objects, mask_by_color):
+  for obj in objects:
+    coordinates = (obj["pixel_coords"][1] , obj["pixel_coords"][0] )
+    for color in mask_by_color:
+      if coordinates in mask_by_color[color]:
+        obj["segmentation"] = mask_by_color[color]
 
 def add_random_objects(scene_struct, num_objects, args, camera):
   """
@@ -430,10 +436,13 @@ def add_random_objects(scene_struct, num_objects, args, camera):
       'rotation': theta,
       'pixel_coords': pixel_coords,
       'color': color_name,
+      'segmentation': [] #pixels are stored after looking for visibility
     })
 
   # Check that all objects are at least partially visible in the rendered image
-  all_visible = check_visibility(blender_objects, args.min_pixels_per_object)
+  all_visible, pixels_by_color = check_visibility(blender_objects, args.min_pixels_per_object, args)
+  assign_mask_to_object(objects, pixels_by_color)
+
   if not all_visible:
     # If any of the objects are fully occluded then start over; delete all
     # objects from the scene and place them all again.
@@ -472,7 +481,7 @@ def compute_all_relationships(scene_struct, eps=0.2):
   return all_relationships
 
 
-def check_visibility(blender_objects, min_pixels_per_object):
+def check_visibility(blender_objects, min_pixels_per_object, args):
   """
   Check whether all objects in the scene have some minimum number of visible
   pixels; to accomplish this we assign random (but distinct) colors to all
@@ -487,15 +496,32 @@ def check_visibility(blender_objects, min_pixels_per_object):
   object_colors = render_shadeless(blender_objects, path=path)
   img = bpy.data.images.load(path)
   p = list(img.pixels)
-  color_count = Counter((p[i], p[i+1], p[i+2], p[i+3])
-                        for i in range(0, len(p), 4))
+
+  pixel_list = []
+  mask_by_color = {}
+
+  column = 0
+  row = args.height - 1
+  for i in range(0, len(p), 4):
+    temp = (p[i], p[i+1], p[i+2], p[i+3])
+    if column >= args.width:
+      row -= 1
+      column = 0
+    pixel_list.append(temp)
+    if temp in mask_by_color:
+      mask_by_color[temp].append((row, column))
+    else:
+      mask_by_color[temp] = [(row, column)]
+    column += 1
+  color_count = Counter(pixel_list)
+
   os.remove(path)
   if len(color_count) != len(blender_objects) + 1:
-    return False
+    return False, mask_by_color
   for _, count in color_count.most_common():
     if count < min_pixels_per_object:
-      return False
-  return True
+      return False, mask_by_color
+  return True, mask_by_color
 
 
 def render_shadeless(blender_objects, path='flat.png'):
