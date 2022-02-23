@@ -9,6 +9,7 @@ from __future__ import print_function
 import math, sys, random, argparse, json, os, tempfile
 from datetime import datetime as dt
 from collections import Counter
+from itertools import permutations
 
 """
 Renders random scenes using Blender, each with with a random number of objects;
@@ -64,9 +65,9 @@ parser.add_argument('--shape_color_combos_json', default=None,
          "for CLEVR-CoGenT.")
 
 # Settings for objects
-parser.add_argument('--min_objects', default=3, type=int,
+parser.add_argument('--min_objects', default=5, type=int,
     help="The minimum number of objects to place in each scene")
-parser.add_argument('--max_objects', default=10, type=int,
+parser.add_argument('--max_objects', default=5, type=int,
     help="The maximum number of objects to place in each scene")
 parser.add_argument('--min_dist', default=0.25, type=float,
     help="The minimum allowed distance between object centers")
@@ -463,21 +464,33 @@ def compute_all_relationships(scene_struct, eps=0.2):
   relationship rel with object i. For example if j is in output['left'][i] then
   object j is left of object i.
   """
+
+  #edges (0,1) = [left, behind], (0,2) = [right, front]
+
+  objs_relations = {
+    "left": 0,
+    "right": 1,
+    "behind": 2,
+    "front": 3,
+  }
+
   all_relationships = {}
   for name, direction_vec in scene_struct['directions'].items():
     if name == 'above' or name == 'below': continue
-    all_relationships[name] = []
     for i, obj1 in enumerate(scene_struct['objects']):
       coords1 = obj1['3d_coords']
-      related = set()
       for j, obj2 in enumerate(scene_struct['objects']):
         if obj1 == obj2: continue
+
+        name_relation = str(i) + "-" + str(j)
+        if name_relation not in all_relationships:
+          all_relationships[name_relation] = []
+
         coords2 = obj2['3d_coords']
         diff = [coords2[k] - coords1[k] for k in [0, 1, 2]]
         dot = sum(diff[k] * direction_vec[k] for k in [0, 1, 2])
         if dot > eps:
-          related.add(j)
-      all_relationships[name].append(sorted(list(related)))
+          all_relationships[name_relation].append(objs_relations[name])
   return all_relationships
 
 
