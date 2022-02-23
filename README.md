@@ -1,3 +1,7 @@
+This is an extension of the CLEVR Dataset Generation repository that includes the masks for the images.
+
+Below the instructions from the main repository:
+
 # CLEVR Dataset Generation
 
 This is the code used to generate the [CLEVR dataset](http://cs.stanford.edu/people/jcjohns/clevr/) as described in the paper:
