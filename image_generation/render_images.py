@@ -9,7 +9,6 @@ from __future__ import print_function
 import math, sys, random, argparse, json, os, tempfile
 from datetime import datetime as dt
 from collections import Counter
-from itertools import permutations
 
 """
 Renders random scenes using Blender, each with with a random number of objects;
@@ -75,7 +74,7 @@ parser.add_argument('--margin', default=0.4, type=float,
     help="Along all cardinal directions (left, right, front, back), all " +
          "objects will be at least this distance apart. This makes resolving " +
          "spatial relationships slightly less ambiguous.")
-parser.add_argument('--min_pixels_per_object', default=200, type=int,
+parser.add_argument('--min_pixels_per_object', default=800, type=int,
     help="All objects will have at least this many visible pixels in the " +
          "final rendered images; this ensures that no objects are fully " +
          "occluded by other objects.")
@@ -84,7 +83,7 @@ parser.add_argument('--max_retries', default=50, type=int,
          "re-placing all objects in the scene.")
 
 # Output settings
-parser.add_argument('--start_idx', default=0, type=int,
+parser.add_argument('--start_idx', default=200, type=int,
     help="The index at which to start for numbering rendered images. Setting " +
          "this to non-zero values allows you to distribute rendering across " +
          "multiple machines and recombine the results later.")
@@ -128,9 +127,9 @@ parser.add_argument('--use_gpu', default=0, type=int,
     help="Setting --use_gpu 1 enables GPU-accelerated rendering using CUDA. " +
          "You must have an NVIDIA GPU with the CUDA toolkit installed for " +
          "to work.")
-parser.add_argument('--width', default=320, type=int,
+parser.add_argument('--width', default=520, type=int,
     help="The width (in pixels) for the rendered images")
-parser.add_argument('--height', default=240, type=int,
+parser.add_argument('--height', default=440, type=int,
     help="The height (in pixels) for the rendered images")
 parser.add_argument('--key_light_jitter', default=1.0, type=float,
     help="The magnitude of random jitter to add to the key light position.")
@@ -312,7 +311,7 @@ def render_scene(args,
 
   # Render the scene and dump the scene data structure
   scene_struct['objects'] = objects
-  scene_struct['relationships'] = compute_all_relationships(scene_struct)
+  scene_struct['relationships'], scene_struct['relationships_modified'] = compute_all_relationships(scene_struct)
   while True:
     try:
       bpy.ops.render.render(write_still=True)
@@ -328,10 +327,45 @@ def render_scene(args,
 
 def assign_mask_to_object(objects, mask_by_color):
   for obj in objects:
-    coordinates = (obj["pixel_coords"][1] , obj["pixel_coords"][0] )
+    coordinates = [obj["pixel_coords"][1] , obj["pixel_coords"][0]]
     for color in mask_by_color:
       if coordinates in mask_by_color[color]:
-        obj["segmentation"] = mask_by_color[color]
+        extracted_pixels= {}
+
+        pixel_colors = sorted(mask_by_color[color], key=lambda x: x[0])
+        for px in pixel_colors:
+            if px[0] in extracted_pixels:
+              if extracted_pixels[px[0]][1] < px[1] or extracted_pixels[px[0]][1] == -1:
+                extracted_pixels[px[0]][1] = px[1]
+            else:
+                extracted_pixels[px[0]] = [px[1], -1]
+
+        final_pixels = []
+        final_pixels_l = []
+        final_pixels_r = []
+
+        prev = -1
+        prev_r = -1
+        for ep in extracted_pixels.items():
+          if ep[1][0] != prev and ep[1][0] + 1 != prev and ep[1][0] - 1 != prev:
+            final_pixels_l.append([ep[0], ep[1][0]])
+            prev = ep[1][0]
+
+          if ep[1][1] != prev_r and ep[1][1] + 1 != prev_r and ep[1][1] - 1 != prev_r:
+            if ep[1][1] != -1:
+              final_pixels_r.append([ep[0], ep[1][1]])
+              prev_r = ep[1][1]
+
+        final_pixels_l = sorted(final_pixels_l, key=lambda x: x[0])
+        final_pixels_r = sorted(final_pixels_r, key=lambda x: x[0])
+
+        final_pixels.extend(final_pixels_l)
+        final_pixels_r.reverse()
+        final_pixels.extend(final_pixels_r)
+
+
+        obj["segmentation"] = final_pixels
+        print("new: ", obj["segmentation"] )
 
 def add_random_objects(scene_struct, num_objects, args, camera):
   """
@@ -475,10 +509,13 @@ def compute_all_relationships(scene_struct, eps=0.2):
   }
 
   all_relationships = {}
+  all_relationships_original = {}
   for name, direction_vec in scene_struct['directions'].items():
     if name == 'above' or name == 'below': continue
+    all_relationships_original[name] = []
     for i, obj1 in enumerate(scene_struct['objects']):
       coords1 = obj1['3d_coords']
+      related = set()
       for j, obj2 in enumerate(scene_struct['objects']):
         if obj1 == obj2: continue
 
@@ -490,9 +527,10 @@ def compute_all_relationships(scene_struct, eps=0.2):
         diff = [coords2[k] - coords1[k] for k in [0, 1, 2]]
         dot = sum(diff[k] * direction_vec[k] for k in [0, 1, 2])
         if dot > eps:
+          related.add(j)
           all_relationships[name_relation].append(objs_relations[name])
-  return all_relationships
-
+      all_relationships_original[name].append(sorted(list(related)))
+  return all_relationships_original, all_relationships
 
 def check_visibility(blender_objects, min_pixels_per_object, args):
   """
@@ -522,9 +560,9 @@ def check_visibility(blender_objects, min_pixels_per_object, args):
       column = 0
     pixel_list.append(temp)
     if temp in mask_by_color:
-      mask_by_color[temp].append((row, column))
+      mask_by_color[temp].append([row, column])
     else:
-      mask_by_color[temp] = [(row, column)]
+      mask_by_color[temp] = [[row, column]]
     column += 1
   color_count = Counter(pixel_list)
 
