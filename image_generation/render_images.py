@@ -83,7 +83,7 @@ parser.add_argument('--max_retries', default=50, type=int,
          "re-placing all objects in the scene.")
 
 # Output settings
-parser.add_argument('--start_idx', default=200, type=int,
+parser.add_argument('--start_idx', default=130, type=int,
     help="The index at which to start for numbering rendered images. Setting " +
          "this to non-zero values allows you to distribute rendering across " +
          "multiple machines and recombine the results later.")
@@ -330,6 +330,7 @@ def assign_mask_to_object(objects, mask_by_color):
     coordinates = [obj["pixel_coords"][1] , obj["pixel_coords"][0]]
     for color in mask_by_color:
       if coordinates in mask_by_color[color]:
+        obj["pixel_mask"] = mask_by_color[color]
         extracted_pixels= {}
 
         pixel_colors = sorted(mask_by_color[color], key=lambda x: x[0])
@@ -471,7 +472,8 @@ def add_random_objects(scene_struct, num_objects, args, camera):
       'rotation': theta,
       'pixel_coords': pixel_coords,
       'color': color_name,
-      'segmentation': [] #pixels are stored after looking for visibility
+      'segmentation': [], #pixels are stored after looking for visibility
+      'pixel_mask': []  # pixels are stored after looking for visibility
     })
 
   # Check that all objects are at least partially visible in the rendered image
